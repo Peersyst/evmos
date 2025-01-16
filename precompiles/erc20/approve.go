@@ -21,6 +21,7 @@ import (
 	auth "github.com/evmos/evmos/v20/precompiles/authorization"
 	cmn "github.com/evmos/evmos/v20/precompiles/common"
 	"github.com/evmos/evmos/v20/x/evm/core/vm"
+	"github.com/holiman/uint256"
 )
 
 // Approve sets the given amount as the allowance of the spender address over
@@ -48,43 +49,8 @@ func (p Precompile) Approve(
 	grantee := spender
 	granter := contract.CallerAddress
 
-	// NOTE: We do not support approvals if the grantee is the granter.
-	// This is different from the ERC20 standard but there is no reason to
-	// do so, since in that case the grantee can just transfer the tokens
-	// without authorization.
-	if bytes.Equal(grantee.Bytes(), granter.Bytes()) {
-		return nil, ErrSpenderIsOwner
-	}
-
-	// TODO: owner should be the owner of the contract
-	authorization, expiration, _ := auth.CheckAuthzExists(ctx, p.AuthzKeeper, grantee, granter, SendMsgURL) //#nosec:G703 -- we are handling the error case (authorization == nil) in the switch statement below
-
-	switch {
-	case authorization == nil && amount != nil && amount.Sign() < 0:
-		// case 1: no authorization, amount 0 or negative -> error
-		err = ErrNegativeAmount
-	case authorization == nil && amount != nil && amount.Sign() > 0:
-		// case 2: no authorization, amount positive -> create a new authorization
-		err = p.createAuthorization(ctx, grantee, granter, amount)
-	case authorization != nil && amount != nil && amount.Sign() <= 0:
-		// case 3: authorization exists, amount 0 or negative -> remove from spend limit and delete authorization if no spend limit left
-		err = p.removeSpendLimitOrDeleteAuthorization(ctx, grantee, granter, authorization, expiration)
-	case authorization != nil && amount != nil && amount.Sign() > 0:
-		// case 4: authorization exists, amount positive -> update authorization
-		sendAuthz, ok := authorization.(*banktypes.SendAuthorization)
-		if !ok {
-			return nil, authz.ErrUnknownAuthorizationType
-		}
-
-		err = p.updateAuthorization(ctx, grantee, granter, amount, sendAuthz, expiration)
-	}
-
+	err = p.approve(ctx, stateDB, grantee, granter, amount, true)
 	if err != nil {
-		return nil, err
-	}
-
-	// TODO: check owner?
-	if err := p.EmitApprovalEvent(ctx, stateDB, p.Address(), spender, amount); err != nil {
 		return nil, err
 	}
 
@@ -331,4 +297,87 @@ func (p Precompile) decreaseAllowance(
 	}
 
 	return amount, nil
+}
+
+func (p Precompile) approve(ctx sdk.Context, stateDB vm.StateDB, spender, owner common.Address, amount *big.Int, emitEvent bool) error {
+	// NOTE: We do not support approvals if the grantee is the granter.
+	// This is different from the ERC20 standard but there is no reason to
+	// do so, since in that case the grantee can just transfer the tokens
+	// without authorization.
+	if bytes.Equal(spender.Bytes(), owner.Bytes()) {
+		return ErrSpenderIsOwner
+	}
+
+	// TODO: owner should be the owner of the contract
+	authorization, expiration, _ := auth.CheckAuthzExists(ctx, p.AuthzKeeper, spender, owner, SendMsgURL) //#nosec:G703 -- we are handling the error case (authorization == nil) in the switch statement below
+
+	var err error
+	switch {
+	case authorization == nil && amount != nil && amount.Sign() < 0:
+		// case 1: no authorization, amount 0 or negative -> error
+		err = ErrNegativeAmount
+	case authorization == nil && amount != nil && amount.Sign() > 0:
+		// case 2: no authorization, amount positive -> create a new authorization
+		err = p.createAuthorization(ctx, spender, owner, amount)
+	case authorization != nil && amount != nil && amount.Sign() <= 0:
+		// case 3: authorization exists, amount 0 or negative -> remove from spend limit and delete authorization if no spend limit left
+		err = p.removeSpendLimitOrDeleteAuthorization(ctx, spender, owner, authorization, expiration)
+	case authorization != nil && amount != nil && amount.Sign() > 0:
+		// case 4: authorization exists, amount positive -> update authorization
+		sendAuthz, ok := authorization.(*banktypes.SendAuthorization)
+		if !ok {
+			return authz.ErrUnknownAuthorizationType
+		}
+
+		err = p.updateAuthorization(ctx, spender, owner, amount, sendAuthz, expiration)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if emitEvent {
+		// TODO: check owner?
+		if err := p.EmitApprovalEvent(ctx, stateDB, p.Address(), spender, amount); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// spendAllowance is a common function that handles spending allowances for the ERC-20 Transfer
+// and TransferFrom methods. It checks the allowance of the spender over the owner's tokens.
+func (p *Precompile) spendAllowance(ctx sdk.Context, stateDB vm.StateDB, owner, spender common.Address, amount *big.Int) error {
+	_, _, allowance, err := GetAuthzExpirationAndAllowance(p.AuthzKeeper, ctx, spender, owner, p.tokenPair.Denom)
+	if err != nil {
+		fmt.Println("err", err)
+		allowance = common.Big0
+	}
+
+	// Check if the allowance does not overflow
+	allowanceUint256, overflow := uint256.FromBig(allowance)
+	if overflow {
+		return fmt.Errorf(ErrIntegerOverflow, allowance)
+	}
+
+	// Check if the amount does not overflow
+	amountUint256, overflow := uint256.FromBig(amount)
+	if overflow {
+		return fmt.Errorf(ErrIntegerOverflow, amount)
+	}
+
+	// Check if the allowance is less than the amount, if so, return an error
+	if allowanceUint256.Lt(amountUint256) {
+		return errors.New(ErrSubtractMoreThanAllowance)
+	}
+
+	return p.approve(
+		ctx,
+		stateDB,
+		owner,
+		spender,
+		new(big.Int).Sub(allowance, amount),
+		false,
+	)
 }

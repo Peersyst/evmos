@@ -305,9 +305,9 @@ func (p *Precompile) burn(ctx sdk.Context, stateDB vm.StateDB, burnerAddr common
 		return ConvertErrToERC20Error(err)
 	}
 
-	if p.tokenPair.Denom == evmtypes.GetEVMCoinDenom() {
+	if p.tokenPair.Denom == utils.BaseDenom {
 		p.SetBalanceChangeEntries(
-			cmn.NewBalanceChangeEntry(burnerAddr, coins.AmountOf(evmtypes.GetEVMCoinDenom()).BigInt(), cmn.Sub))
+			cmn.NewBalanceChangeEntry(burnerAddr, coins.AmountOf(utils.BaseDenom).BigInt(), cmn.Sub))
 	}
 
 	if err = p.EmitTransferEvent(ctx, stateDB, burnerAddr, ZeroAddress, amount); err != nil {

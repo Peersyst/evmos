@@ -3,7 +3,6 @@
 package erc20
 
 import (
-	"fmt"
 	"math/big"
 
 	errorsmod "cosmossdk.io/errors"
@@ -31,6 +30,8 @@ const (
 	MintMethod = "mint"
 	// BurnMethod defines the ABI method name for the ERC-20 burn transaction.
 	BurnMethod = "burn"
+	// Burn0Method defines the ABI method name for burn transaction with 2 arguments (spender, amount).
+	Burn0Method = "burn0"
 	// BurnFromMethod defines the ABI method name for the ERC-20 burnFrom transaction.
 	BurnFromMethod = "burnFrom"
 	// TransferOwnershipMethod defines the ABI method name for the ERC-20 transferOwnership transaction.
@@ -192,30 +193,7 @@ func (p *Precompile) Mint(
 	return method.Outputs.Pack(true)
 }
 
-// Burn is the entrypoint for the burn method. It delegates the call to the
-// appropriate burn function based on the number of arguments.
-// 1 arg: burn the caller's tokens
-// 2 args: execute a burn from the given address
-func (p *Precompile) ExecuteBurn(
-	ctx sdk.Context,
-	contract *vm.Contract,
-	stateDB vm.StateDB,
-	method *abi.Method,
-	args []interface{},
-) ([]byte, error) {
-	switch len(args) {
-	case 1:
-		return p.Burn(ctx, contract, stateDB, method, args)
-	case 2:
-		return p.BurnFrom(ctx, contract, stateDB, method, args)
-	default:
-		return nil, fmt.Errorf("invalid number of arguments; expected 1 or 2; got: %d", len(args))
-	}
-}
-
-// ExecuteBurn executes a Burn or BurnFrom method, depending on the number of arguments.
-// If 1 argument, it burns the caller's tokens.
-// If 2 arguments, it burns the tokens of the given address.
+// Burn executes a burn of the caller's tokens.
 func (p *Precompile) Burn(
 	ctx sdk.Context,
 	contract *vm.Contract,
@@ -251,10 +229,10 @@ func (p *Precompile) BurnFrom(
 	}
 
 	if err := p.spendAllowance(ctx, stateDB, burnerAddr, contract.CallerAddress, amount); err != nil {
-		return nil, err
+		return nil, ConvertErrToERC20Error(err)
 	}
 	if err := p.burn(ctx, stateDB, burnerAddr, amount); err != nil {
-		return nil, err
+		return nil, ConvertErrToERC20Error(err)
 	}
 
 	return method.Outputs.Pack()

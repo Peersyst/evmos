@@ -119,6 +119,8 @@ func (p Precompile) RequiredGas(input []byte) uint64 {
 		return GasMint
 	case BurnMethod:
 		return GasTransfer
+	case Burn0Method:
+		return GasTransfer
 	case BurnFromMethod:
 		return GasTransfer
 	case TransferOwnershipMethod:
@@ -177,6 +179,7 @@ func (Precompile) IsTransaction(methodName string) bool {
 		auth.DecreaseAllowanceMethod,
 		MintMethod,
 		BurnMethod,
+		Burn0Method,
 		BurnFromMethod,
 		TransferOwnershipMethod:
 		return true
@@ -208,7 +211,9 @@ func (p *Precompile) HandleMethod(
 	case MintMethod:
 		bz, err = p.Mint(ctx, contract, stateDB, method, args)
 	case BurnMethod:
-		bz, err = p.ExecuteBurn(ctx, contract, stateDB, method, args)
+		bz, err = p.Burn(ctx, contract, stateDB, method, args)
+	case Burn0Method:
+		bz, err = p.BurnFrom(ctx, contract, stateDB, method, args)
 	case BurnFromMethod:
 		bz, err = p.BurnFrom(ctx, contract, stateDB, method, args)
 	case TransferOwnershipMethod:

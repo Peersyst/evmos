@@ -351,7 +351,6 @@ func (p Precompile) approve(ctx sdk.Context, stateDB vm.StateDB, spender, owner 
 func (p *Precompile) spendAllowance(ctx sdk.Context, stateDB vm.StateDB, owner, spender common.Address, amount *big.Int) error {
 	_, _, allowance, err := GetAuthzExpirationAndAllowance(p.AuthzKeeper, ctx, spender, owner, p.tokenPair.Denom)
 	if err != nil {
-		fmt.Println("err", err)
 		allowance = common.Big0
 	}
 

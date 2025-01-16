@@ -388,7 +388,7 @@ func (s *PrecompileTestSuite) TestMint() {
 	}
 }
 
-func (s *PrecompileTestSuite) TestExecuteBurn() {
+func (s *PrecompileTestSuite) TestBurn() {
 	method := s.precompile.Methods[erc20.BurnMethod]
 	amount := int64(100)
 
@@ -473,67 +473,7 @@ func (s *PrecompileTestSuite) TestExecuteBurn() {
 			err = s.network.App.BankKeeper.SendCoinsFromModuleToAccount(s.network.GetContext(), erc20types.ModuleName, prefundedAccount.AccAddr, coins)
 			s.Require().NoError(err, "failed to send coins from module to account")
 
-			_, err = precompile.ExecuteBurn(ctx, contract, stateDB, &method, args)
-			if tc.expErr {
-				s.Require().Error(err, "expected burn transaction to fail")
-				s.Require().Contains(err.Error(), tc.errContains, "expected burn transaction to fail with specific error")
-			} else {
-				s.Require().NoError(err, "expected transfer transaction succeeded")
-				tc.postCheck()
-			}
-		})
-	}
-}
-
-func (s *PrecompileTestSuite) TestBurn() {
-	method := s.precompile.Methods[erc20.BurnMethod]
-	from := s.keyring.GetKey(0)
-	testcases := []struct {
-		name        string
-		malleate    func() []interface{}
-		postCheck   func()
-		expErr      bool
-		errContains string
-	}{
-		{
-			"pass",
-			func() []interface{} {
-				return []interface{}{big.NewInt(100)}
-			},
-			func() {
-				fromBalance := s.network.App.BankKeeper.GetBalance(s.network.GetContext(), from.AccAddr, tokenDenom)
-				s.Require().Equal(big.NewInt(0), fromBalance.Amount.BigInt(), "expected fromAddr to have 0 XMPL")
-			},
-			false,
-			"",
-		},
-	}
-
-	for _, tc := range testcases {
-		s.Run(tc.name, func() {
-			s.SetupTest()
-			stateDB := s.network.GetStateDB()
-			coins := sdk.Coins{{Denom: tokenDenom, Amount: math.NewInt(100)}}
-
-			tokenPair := erc20types.NewTokenPair(utiltx.GenerateAddress(), s.tokenDenom, erc20types.OWNER_MODULE)
-			tokenPair.SetOwnerAddress(from.AccAddr.String())
-			s.network.App.Erc20Keeper.SetTokenPair(s.network.GetContext(), tokenPair)
-			s.network.App.Erc20Keeper.SetDenomMap(s.network.GetContext(), tokenPair.Denom, tokenPair.GetID())
-			s.network.App.Erc20Keeper.SetERC20Map(s.network.GetContext(), tokenPair.GetERC20Contract(), tokenPair.GetID())
-
-			precompile, err := setupERC20PrecompileForTokenPair(*s.network, tokenPair)
-			s.Require().NoError(err, "failed to set up %q erc20 precompile", tokenPair.Denom)
-
-			var contract *vm.Contract
-			contract, ctx := testutil.NewPrecompileContract(s.T(), s.network.GetContext(), from.Addr, precompile, 0)
-
-			// Mint some coins to the module account and then send to the from address
-			err = s.network.App.BankKeeper.MintCoins(s.network.GetContext(), erc20types.ModuleName, coins)
-			s.Require().NoError(err, "failed to mint coins")
-			err = s.network.App.BankKeeper.SendCoinsFromModuleToAccount(s.network.GetContext(), erc20types.ModuleName, from.AccAddr, coins)
-			s.Require().NoError(err, "failed to send coins from module to account")
-
-			_, err = precompile.Burn(ctx, contract, stateDB, &method, tc.malleate())
+			_, err = precompile.Burn(ctx, contract, stateDB, &method, args)
 			if tc.expErr {
 				s.Require().Error(err, "expected burn transaction to fail")
 				s.Require().Contains(err.Error(), tc.errContains, "expected burn transaction to fail with specific error")

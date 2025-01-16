@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/evmos/evmos/v20/precompiles/erc20"
 	"github.com/evmos/evmos/v20/precompiles/testutil"
+	"github.com/evmos/evmos/v20/testutil/integration/evmos/keyring"
 	utiltx "github.com/evmos/evmos/v20/testutil/tx"
 	erc20types "github.com/evmos/evmos/v20/x/erc20/types"
 	"github.com/evmos/evmos/v20/x/evm/core/vm"
@@ -387,6 +388,103 @@ func (s *PrecompileTestSuite) TestMint() {
 	}
 }
 
+func (s *PrecompileTestSuite) TestExecuteBurn() {
+	method := s.precompile.Methods[erc20.BurnMethod]
+	amount := int64(100)
+
+	testcases := []struct {
+		name             string
+		contractDeployer keyring.Key
+		prefundedAccount keyring.Key
+		malleate         func() (keyring.Key, keyring.Key, []interface{})
+		postCheck        func()
+		expErr           bool
+		errContains      string
+	}{
+		{
+			"fail - invalid args",
+			s.keyring.GetKey(0),
+			s.keyring.GetKey(0),
+			func() (keyring.Key, keyring.Key, []interface{}) {
+				return s.keyring.GetKey(0), s.keyring.GetKey(0), []interface{}{}
+			},
+			func() {},
+			true,
+			"invalid number of arguments",
+		},
+		{
+			"pass - burn from caller",
+			s.keyring.GetKey(0),
+			s.keyring.GetKey(0),
+			func() (keyring.Key, keyring.Key, []interface{}) {
+				return s.keyring.GetKey(0), s.keyring.GetKey(0), []interface{}{
+					big.NewInt(amount),
+				}
+			},
+			func() {},
+			false,
+			"",
+		},
+		{
+			"pass - burn from address",
+			s.keyring.GetKey(0),
+			s.keyring.GetKey(1),
+			func() (keyring.Key, keyring.Key, []interface{}) {
+				s.setupSendAuthz(
+					s.keyring.GetAccAddr(0),
+					s.keyring.GetPrivKey(1),
+					sdk.NewCoins(sdk.NewInt64Coin(s.tokenDenom, amount)),
+				)
+				return s.keyring.GetKey(0), s.keyring.GetKey(1), []interface{}{
+					s.keyring.GetAddr(1),
+					big.NewInt(amount),
+				}
+			},
+			func() {},
+			false,
+			"",
+		},
+	}
+
+	for _, tc := range testcases {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+
+			contractDeployer, prefundedAccount, args := tc.malleate()
+
+			stateDB := s.network.GetStateDB()
+			coins := sdk.Coins{{Denom: tokenDenom, Amount: math.NewInt(100)}}
+
+			tokenPair := erc20types.NewTokenPair(utiltx.GenerateAddress(), s.tokenDenom, erc20types.OWNER_MODULE)
+			tokenPair.SetOwnerAddress(contractDeployer.AccAddr.String())
+			s.network.App.Erc20Keeper.SetTokenPair(s.network.GetContext(), tokenPair)
+			s.network.App.Erc20Keeper.SetDenomMap(s.network.GetContext(), tokenPair.Denom, tokenPair.GetID())
+			s.network.App.Erc20Keeper.SetERC20Map(s.network.GetContext(), tokenPair.GetERC20Contract(), tokenPair.GetID())
+
+			precompile, err := setupERC20PrecompileForTokenPair(*s.network, tokenPair)
+			s.Require().NoError(err, "failed to set up %q erc20 precompile", tokenPair.Denom)
+
+			var contract *vm.Contract
+			contract, ctx := testutil.NewPrecompileContract(s.T(), s.network.GetContext(), contractDeployer.Addr, precompile, 0)
+
+			// Mint some coins to the module account and then send to the from address
+			err = s.network.App.BankKeeper.MintCoins(s.network.GetContext(), erc20types.ModuleName, coins)
+			s.Require().NoError(err, "failed to mint coins")
+			err = s.network.App.BankKeeper.SendCoinsFromModuleToAccount(s.network.GetContext(), erc20types.ModuleName, prefundedAccount.AccAddr, coins)
+			s.Require().NoError(err, "failed to send coins from module to account")
+
+			_, err = precompile.ExecuteBurn(ctx, contract, stateDB, &method, args)
+			if tc.expErr {
+				s.Require().Error(err, "expected burn transaction to fail")
+				s.Require().Contains(err.Error(), tc.errContains, "expected burn transaction to fail with specific error")
+			} else {
+				s.Require().NoError(err, "expected transfer transaction succeeded")
+				tc.postCheck()
+			}
+		})
+	}
+}
+
 func (s *PrecompileTestSuite) TestBurn() {
 	method := s.precompile.Methods[erc20.BurnMethod]
 	from := s.keyring.GetKey(0)
@@ -436,6 +534,135 @@ func (s *PrecompileTestSuite) TestBurn() {
 			s.Require().NoError(err, "failed to send coins from module to account")
 
 			_, err = precompile.Burn(ctx, contract, stateDB, &method, tc.malleate())
+			if tc.expErr {
+				s.Require().Error(err, "expected burn transaction to fail")
+				s.Require().Contains(err.Error(), tc.errContains, "expected burn transaction to fail with specific error")
+			} else {
+				s.Require().NoError(err, "expected transfer transaction succeeded")
+				tc.postCheck()
+			}
+		})
+	}
+}
+
+func (s *PrecompileTestSuite) TestBurnFrom() {
+	method := s.precompile.Methods[erc20.BurnFromMethod]
+	amount := int64(100)
+
+	testcases := []struct {
+		name        string
+		malleate    func() []interface{}
+		postCheck   func()
+		expErr      bool
+		errContains string
+	}{
+		{
+			"should fail - empty args",
+			func() []interface{} {
+				return nil
+			},
+			func() {},
+			true,
+			"invalid number of arguments",
+		},
+		{
+			"should fail - invalid address",
+			func() []interface{} {
+				return []interface{}{
+					"invalid",
+					big.NewInt(amount),
+				}
+			},
+			func() {},
+			true,
+			"invalid from address",
+		},
+		{
+			"should fail - invalid amount",
+			func() []interface{} {
+				return []interface{}{
+					s.keyring.GetAddr(0),
+					"invalid",
+				}
+			},
+			func() {},
+			true,
+			"invalid amount",
+		},
+		{
+			"should fail - allowance is 0",
+			func() []interface{} {
+				return []interface{}{
+					s.keyring.GetAddr(0),
+					big.NewInt(100),
+				}
+			},
+			func() {},
+			true,
+			"subtracted value cannot be greater than existing allowance",
+		},
+		{
+			"should fail - allowance is less than amount",
+			func() []interface{} {
+				s.setupSendAuthz(
+					s.keyring.GetAccAddr(1),
+					s.keyring.GetPrivKey(0),
+					sdk.NewCoins(sdk.NewInt64Coin(s.tokenDenom, 1)),
+				)
+
+				return []interface{}{
+					s.keyring.GetAddr(0),
+					big.NewInt(amount),
+				}
+			},
+			func() {},
+			true,
+			"subtracted value cannot be greater than existing allowance",
+		},
+		{
+			"should pass",
+			func() []interface{} {
+				s.setupSendAuthz(
+					s.keyring.GetAccAddr(0),
+					s.keyring.GetPrivKey(1),
+					sdk.NewCoins(sdk.NewInt64Coin(s.tokenDenom, amount+1)),
+				)
+				return []interface{}{
+					s.keyring.GetAddr(1),
+					big.NewInt(amount),
+				}
+			},
+			func() {},
+			false,
+			"",
+		},
+	}
+
+	for _, tc := range testcases {
+		s.Run(tc.name, func() {
+			s.SetupTest()
+			stateDB := s.network.GetStateDB()
+			coins := sdk.Coins{{Denom: tokenDenom, Amount: math.NewInt(amount)}}
+
+			tokenPair := erc20types.NewTokenPair(utiltx.GenerateAddress(), s.tokenDenom, erc20types.OWNER_MODULE)
+			tokenPair.SetOwnerAddress(s.keyring.GetAddr(0).String())
+			s.network.App.Erc20Keeper.SetTokenPair(s.network.GetContext(), tokenPair)
+			s.network.App.Erc20Keeper.SetDenomMap(s.network.GetContext(), tokenPair.Denom, tokenPair.GetID())
+			s.network.App.Erc20Keeper.SetERC20Map(s.network.GetContext(), tokenPair.GetERC20Contract(), tokenPair.GetID())
+
+			precompile, err := setupERC20PrecompileForTokenPair(*s.network, tokenPair)
+			s.Require().NoError(err, "failed to set up %q erc20 precompile", tokenPair.Denom)
+
+			var contract *vm.Contract
+			contract, ctx := testutil.NewPrecompileContract(s.T(), s.network.GetContext(), s.keyring.GetAddr(0), precompile, 0)
+
+			// Mint some coins to the module account and then send to the from address
+			err = s.network.App.BankKeeper.MintCoins(s.network.GetContext(), erc20types.ModuleName, coins)
+			s.Require().NoError(err, "failed to mint coins")
+			err = s.network.App.BankKeeper.SendCoinsFromModuleToAccount(s.network.GetContext(), erc20types.ModuleName, s.keyring.GetAccAddr(1), coins)
+			s.Require().NoError(err, "failed to send coins from module to account")
+
+			_, err = precompile.BurnFrom(ctx, contract, stateDB, &method, tc.malleate())
 			if tc.expErr {
 				s.Require().Error(err, "expected burn transaction to fail")
 				s.Require().Contains(err.Error(), tc.errContains, "expected burn transaction to fail with specific error")

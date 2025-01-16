@@ -35,9 +35,8 @@ const (
 	GasTotalSupply       = 2_477
 	GasBalanceOf         = 2_851
 	GasAllowance         = 3_246
-	GasMint              = 3_000_000
-	GasBurn              = 3_000_000
-	GasTransferOwnership = 50_000
+	GasMint              = 50_000
+	GasTransferOwnership = 25_000
 )
 
 // Embed abi json file to the executable binary. Needed when importing as dependency.
@@ -119,7 +118,9 @@ func (p Precompile) RequiredGas(input []byte) uint64 {
 	case MintMethod:
 		return GasMint
 	case BurnMethod:
-		return GasBurn
+		return GasTransfer
+	case BurnFromMethod:
+		return GasTransfer
 	case TransferOwnershipMethod:
 		return GasTransferOwnership
 	// ERC-20 queries
@@ -176,6 +177,7 @@ func (Precompile) IsTransaction(methodName string) bool {
 		auth.DecreaseAllowanceMethod,
 		MintMethod,
 		BurnMethod,
+		BurnFromMethod,
 		TransferOwnershipMethod:
 		return true
 	default:
@@ -206,7 +208,9 @@ func (p *Precompile) HandleMethod(
 	case MintMethod:
 		bz, err = p.Mint(ctx, contract, stateDB, method, args)
 	case BurnMethod:
-		bz, err = p.Burn(ctx, contract, stateDB, method, args)
+		bz, err = p.ExecuteBurn(ctx, contract, stateDB, method, args)
+	case BurnFromMethod:
+		bz, err = p.BurnFrom(ctx, contract, stateDB, method, args)
 	case TransferOwnershipMethod:
 		bz, err = p.TransferOwnership(ctx, contract, stateDB, method, args)
 	// ERC-20 queries

@@ -3,6 +3,7 @@
 package erc20
 
 import (
+	"fmt"
 	"math/big"
 
 	errorsmod "cosmossdk.io/errors"
@@ -30,6 +31,8 @@ const (
 	MintMethod = "mint"
 	// BurnMethod defines the ABI method name for the ERC-20 burn transaction.
 	BurnMethod = "burn"
+	// BurnFromMethod defines the ABI method name for the ERC-20 burnFrom transaction.
+	BurnFromMethod = "burnFrom"
 	// TransferOwnershipMethod defines the ABI method name for the ERC-20 transferOwnership transaction.
 	TransferOwnershipMethod = "transferOwnership"
 )
@@ -189,7 +192,30 @@ func (p *Precompile) Mint(
 	return method.Outputs.Pack(true)
 }
 
-// Burn executes a burn of the caller's tokens.
+// Burn is the entrypoint for the burn method. It delegates the call to the
+// appropriate burn function based on the number of arguments.
+// 1 arg: burn the caller's tokens
+// 2 args: execute a burn from the given address
+func (p *Precompile) ExecuteBurn(
+	ctx sdk.Context,
+	contract *vm.Contract,
+	stateDB vm.StateDB,
+	method *abi.Method,
+	args []interface{},
+) ([]byte, error) {
+	switch len(args) {
+	case 1:
+		return p.Burn(ctx, contract, stateDB, method, args)
+	case 2:
+		return p.BurnFrom(ctx, contract, stateDB, method, args)
+	default:
+		return nil, fmt.Errorf("invalid number of arguments; expected 1 or 2; got: %d", len(args))
+	}
+}
+
+// ExecuteBurn executes a Burn or BurnFrom method, depending on the number of arguments.
+// If 1 argument, it burns the caller's tokens.
+// If 2 arguments, it burns the tokens of the given address.
 func (p *Precompile) Burn(
 	ctx sdk.Context,
 	contract *vm.Contract,
@@ -203,22 +229,31 @@ func (p *Precompile) Burn(
 	}
 
 	burnerAddr := contract.CallerAddress
-	burner := sdk.AccAddress(burnerAddr.Bytes())
 
-	coins := sdk.Coins{{Denom: p.tokenPair.Denom, Amount: math.NewIntFromBigInt(amount)}}
+	if err := p.burn(ctx, stateDB, burnerAddr, amount); err != nil {
+		return nil, err
+	}
 
-	err = p.erc20Keeper.BurnCoins(ctx, burner, math.NewIntFromBigInt(amount), p.tokenPair.GetERC20Contract().Hex())
+	return method.Outputs.Pack()
+}
+
+// BurnFrom executes a burn of the caller's tokens.
+func (p *Precompile) BurnFrom(
+	ctx sdk.Context,
+	contract *vm.Contract,
+	stateDB vm.StateDB,
+	method *abi.Method,
+	args []interface{},
+) ([]byte, error) {
+	burnerAddr, amount, err := ParseBurnFromArgs(args)
 	if err != nil {
-		return nil, ConvertErrToERC20Error(err)
+		return nil, err
 	}
 
-	// TODO: where should we get this
-	if p.tokenPair.Denom == utils.BaseDenom {
-		p.SetBalanceChangeEntries(
-			cmn.NewBalanceChangeEntry(burnerAddr, coins.AmountOf(utils.BaseDenom).BigInt(), cmn.Sub),
-		)
+	if err := p.spendAllowance(ctx, stateDB, burnerAddr, contract.CallerAddress, amount); err != nil {
+		return nil, err
 	}
-	if err = p.EmitTransferEvent(ctx, stateDB, burnerAddr, ZeroAddress, amount); err != nil {
+	if err := p.burn(ctx, stateDB, burnerAddr, amount); err != nil {
 		return nil, err
 	}
 
@@ -256,4 +291,28 @@ func (p *Precompile) TransferOwnership(
 	}
 
 	return method.Outputs.Pack()
+}
+
+// burn is a common function that handles burns for the ERC-20 Burn
+// and BurnFrom methods. It executes a bank BurnCoins message.
+func (p *Precompile) burn(ctx sdk.Context, stateDB vm.StateDB, burnerAddr common.Address, amount *big.Int) error {
+	burner := sdk.AccAddress(burnerAddr.Bytes())
+
+	coins := sdk.Coins{{Denom: p.tokenPair.Denom, Amount: math.NewIntFromBigInt(amount)}}
+
+	err := p.erc20Keeper.BurnCoins(ctx, burner, math.NewIntFromBigInt(amount), p.tokenPair.GetERC20Contract().Hex())
+	if err != nil {
+		return ConvertErrToERC20Error(err)
+	}
+
+	if p.tokenPair.Denom == evmtypes.GetEVMCoinDenom() {
+		p.SetBalanceChangeEntries(
+			cmn.NewBalanceChangeEntry(burnerAddr, coins.AmountOf(evmtypes.GetEVMCoinDenom()).BigInt(), cmn.Sub))
+	}
+
+	if err = p.EmitTransferEvent(ctx, stateDB, burnerAddr, ZeroAddress, amount); err != nil {
+		return err
+	}
+
+	return nil
 }

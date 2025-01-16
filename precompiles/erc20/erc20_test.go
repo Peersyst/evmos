@@ -40,6 +40,8 @@ func (s *PrecompileTestSuite) TestIsTransaction() {
 	s.Require().True(s.precompile.IsTransaction(&method))
 	method = s.precompile.Methods[erc20.BurnMethod]
 	s.Require().True(s.precompile.IsTransaction(&method))
+	method = s.precompile.Methods[erc20.BurnFromMethod]
+	s.Require().True(s.precompile.IsTransaction(&method))
 	method = s.precompile.Methods[erc20.TransferOwnershipMethod]
 	s.Require().True(s.precompile.IsTransaction(&method))
 }
@@ -167,7 +169,16 @@ func (s *PrecompileTestSuite) TestRequiredGas() {
 				s.Require().NoError(err, "expected no error packing ABI")
 				return bz
 			},
-			expGas: erc20.GasBurn,
+			expGas: erc20.GasTransfer,
+		},
+		{
+			name: erc20.BurnFromMethod,
+			malleate: func() []byte {
+				bz, err := s.precompile.ABI.Pack(erc20.BurnFromMethod, s.keyring.GetAddr(0), big.NewInt(1))
+				s.Require().NoError(err, "expected no error packing ABI")
+				return bz
+			},
+			expGas: erc20.GasTransfer,
 		},
 		{
 			name: erc20.TransferOwnershipMethod,

@@ -36,7 +36,6 @@ const (
 	GasBalanceOf         = 2_851
 	GasAllowance         = 3_246
 	GasMint              = 50_000
-	GasBurn              = 50_000
 	GasTransferOwnership = 25_000
 )
 
@@ -120,7 +119,9 @@ func (p Precompile) RequiredGas(input []byte) uint64 {
 	case MintMethod:
 		return GasMint
 	case BurnMethod:
-		return GasBurn
+		return GasTransfer
+	case BurnFromMethod:
+		return GasTransfer
 	case TransferOwnershipMethod:
 		return GasTransferOwnership
 	// ERC-20 queries
@@ -185,6 +186,7 @@ func (Precompile) IsTransaction(method *abi.Method) bool {
 		auth.DecreaseAllowanceMethod,
 		MintMethod,
 		BurnMethod,
+		BurnFromMethod,
 		TransferOwnershipMethod:
 		return true
 	default:
@@ -215,7 +217,9 @@ func (p *Precompile) HandleMethod(
 	case MintMethod:
 		bz, err = p.Mint(ctx, contract, stateDB, method, args)
 	case BurnMethod:
-		bz, err = p.Burn(ctx, contract, stateDB, method, args)
+		bz, err = p.ExecuteBurn(ctx, contract, stateDB, method, args)
+	case BurnFromMethod:
+		bz, err = p.BurnFrom(ctx, contract, stateDB, method, args)
 	case TransferOwnershipMethod:
 		bz, err = p.TransferOwnership(ctx, contract, stateDB, method, args)
 	// ERC-20 queries

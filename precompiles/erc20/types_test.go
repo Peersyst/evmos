@@ -403,6 +403,66 @@ func (s *PrecompileTestSuite) TestParseBurnArgs() {
 	}
 }
 
+func (s *PrecompileTestSuite) TestParseBurnFromArgs() {
+	from := utiltx.GenerateAddress()
+	amount := big.NewInt(100)
+
+	testcases := []struct {
+		name        string
+		args        []interface{}
+		expPass     bool
+		errContains string
+	}{
+		{
+			name: "fail - invalid from address",
+			args: []interface{}{
+				"invalid address",
+				amount,
+			},
+			errContains: "invalid from address",
+		},
+		{
+			name: "fail - invalid amount",
+			args: []interface{}{
+				from,
+				"invalid amount",
+			},
+			errContains: "invalid amount",
+		},
+		{
+			name: "fail - invalid number of arguments",
+			args: []interface{}{
+				s.keyring.GetAddr(0),
+				big.NewInt(1),
+				big.NewInt(2),
+			},
+			errContains: "invalid number of arguments",
+		},
+		{
+			name: "pass - correct arguments",
+			args: []interface{}{
+				from,
+				amount,
+			},
+			expPass: true,
+		},
+	}
+
+	for _, tc := range testcases {
+		s.Run(tc.name, func() {
+			from, amount, err := erc20.ParseBurnFromArgs(tc.args)
+			if tc.expPass {
+				s.Require().NoError(err, "unexpected error parsing the burnFrom arguments")
+				s.Require().Equal(from, tc.args[0], "expected different from address")
+				s.Require().Equal(amount, tc.args[1], "expected different amount")
+			} else {
+				s.Require().Error(err, "expected an error parsing the burnFrom arguments")
+				s.Require().ErrorContains(err, tc.errContains, "expected different error message")
+			}
+		})
+	}
+}
+
 func (s *PrecompileTestSuite) TestParseOwnerArgs() {
 	testcases := []struct {
 		name        string

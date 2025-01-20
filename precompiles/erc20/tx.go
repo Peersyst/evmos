@@ -258,7 +258,7 @@ func (p *Precompile) BurnFrom(
 		return nil, ConvertErrToERC20Error(err)
 	}
 
-	if err := p.burn(ctx, stateDB, burnerAddr, amount, true); err != nil {
+	if err := p.burn(ctx, stateDB, spenderAddr, amount, true); err != nil {
 		return nil, ConvertErrToERC20Error(err)
 	}
 

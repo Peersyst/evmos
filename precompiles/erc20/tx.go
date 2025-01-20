@@ -329,37 +329,3 @@ func (p *Precompile) burn(ctx sdk.Context, stateDB vm.StateDB, burnerAddr common
 
 	return nil
 }
-
-func (p *Precompile) transferAmount(
-	ctx sdk.Context,
-	from, to common.Address,
-	amount *big.Int,
-) (*big.Int, error) {
-	fromAddr := sdk.AccAddress(from.Bytes())
-	toAddr := sdk.AccAddress(to.Bytes())
-	ownerIsSpender := fromAddr.Equals(toAddr)
-
-	coins := sdk.Coins{{Denom: p.tokenPair.Denom, Amount: math.NewIntFromBigInt(amount)}}
-
-	msg := banktypes.NewMsgSend(fromAddr.Bytes(), toAddr.Bytes(), coins)
-
-	if err := msg.Amount.Validate(); err != nil {
-		return nil, err
-	}
-
-	var prevAllowance *big.Int
-	var err error
-	if ownerIsSpender {
-		msgSrv := bankkeeper.NewMsgServerImpl(p.bankKeeper)
-		_, err = msgSrv.Send(ctx, msg)
-	} else {
-		_, _, prevAllowance, err = GetAuthzExpirationAndAllowance(p.AuthzKeeper, ctx, to, from, p.tokenPair.Denom)
-		if err != nil {
-			return nil, ConvertErrToERC20Error(errorsmod.Wrapf(authz.ErrNoAuthorizationFound, "%s", err.Error()))
-		}
-
-		_, err = p.AuthzKeeper.DispatchActions(ctx, toAddr, []sdk.Msg{msg})
-	}
-
-	return prevAllowance, err
-}

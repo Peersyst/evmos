@@ -147,7 +147,7 @@ func (s *PrecompileTestSuite) TestRequiredGas() {
 				s.Require().NoError(err, "expected no error packing ABI")
 				return bz
 			},
-			expGas: erc20.GasMint,
+			expGas: erc20.GasTransfer,
 		},
 		{
 			name: erc20.BurnMethod,

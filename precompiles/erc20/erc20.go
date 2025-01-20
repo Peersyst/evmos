@@ -35,8 +35,7 @@ const (
 	GasTotalSupply       = 2_477
 	GasBalanceOf         = 2_851
 	GasAllowance         = 3_246
-	GasMint              = 50_000
-	GasTransferOwnership = 25_000
+	GasTransferOwnership = 50_000
 )
 
 // Embed abi json file to the executable binary. Needed when importing as dependency.
@@ -116,7 +115,7 @@ func (p Precompile) RequiredGas(input []byte) uint64 {
 	case auth.DecreaseAllowanceMethod:
 		return GasDecreaseAllowance
 	case MintMethod:
-		return GasMint
+		return GasTransfer
 	case BurnMethod:
 		return GasTransfer
 	case Burn0Method:

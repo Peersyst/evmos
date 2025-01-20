@@ -446,7 +446,6 @@ func (s *PrecompileTestSuite) TestBurn() {
 		},
 	}
 
-	//nolint:dupl
 	for _, tc := range testcases {
 		s.Run(tc.name, func() {
 			s.SetupTest()
@@ -557,7 +556,6 @@ func (s *PrecompileTestSuite) TestBurn0() {
 		},
 	}
 
-	//nolint:dupl
 	for _, tc := range testcases {
 		s.Run(tc.name, func() {
 			s.SetupTest()

@@ -258,8 +258,12 @@ func (p *Precompile) BurnFrom(
 		return nil, ConvertErrToERC20Error(err)
 	}
 
-	if err := p.burn(ctx, stateDB, spenderAddr, amount, true); err != nil {
+	if err := p.burn(ctx, stateDB, spenderAddr, amount, false); err != nil {
 		return nil, ConvertErrToERC20Error(err)
+	}
+
+	if err = p.EmitTransferEvent(ctx, stateDB, burnerAddr, ZeroAddress, amount); err != nil {
+		return nil, err
 	}
 
 	var newAllowance *big.Int

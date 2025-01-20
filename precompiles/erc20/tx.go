@@ -101,6 +101,8 @@ func (p *Precompile) transfer(
 	}
 
 	isTransferFrom := method.Name == TransferFromMethod
+	isBurnFrom := method.Name == BurnFromMethod
+
 	owner := sdk.AccAddress(from.Bytes())
 	spenderAddr := contract.CallerAddress
 	spender := sdk.AccAddress(spenderAddr.Bytes()) // aka. grantee
@@ -136,7 +138,7 @@ func (p *Precompile) transfer(
 
 	// NOTE: if it's a direct transfer, we return here but if used through transferFrom,
 	// we need to emit the approval event with the new allowance.
-	if !isTransferFrom {
+	if !isTransferFrom && !isBurnFrom {
 		return method.Outputs.Pack(true)
 	}
 
@@ -151,6 +153,10 @@ func (p *Precompile) transfer(
 
 	if err = p.EmitApprovalEvent(ctx, stateDB, from, spenderAddr, newAllowance); err != nil {
 		return nil, err
+	}
+
+	if isBurnFrom {
+		return method.Outputs.Pack()
 	}
 
 	return method.Outputs.Pack(true)
@@ -218,7 +224,7 @@ func (p *Precompile) Burn(
 // Burn0 executes a burn of the spender's tokens.
 func (p *Precompile) Burn0(
 	ctx sdk.Context,
-	_ *vm.Contract,
+	contract *vm.Contract,
 	stateDB vm.StateDB,
 	method *abi.Method,
 	args []interface{},
@@ -226,6 +232,16 @@ func (p *Precompile) Burn0(
 	spender, amount, err := ParseBurn0Args(args)
 	if err != nil {
 		return nil, err
+	}
+
+	owner, err := sdk.AccAddressFromBech32(p.tokenPair.OwnerAddress)
+	if err != nil {
+		return nil, err
+	}
+	sender := sdk.AccAddress(contract.CallerAddress.Bytes())
+
+	if !sender.Equals(owner) {
+		return nil, ConvertErrToERC20Error(types.ErrSenderIsNotOwner)
 	}
 
 	if err := p.burn(ctx, stateDB, spender, amount, true); err != nil {
@@ -243,39 +259,12 @@ func (p *Precompile) BurnFrom(
 	method *abi.Method,
 	args []interface{},
 ) ([]byte, error) {
-	burnerAddr, amount, err := ParseBurnFromArgs(args)
+	owner, amount, err := ParseBurnFromArgs(args)
 	if err != nil {
 		return nil, err
 	}
 
-	owner := sdk.AccAddress(burnerAddr.Bytes())
-	spenderAddr := contract.CallerAddress
-	spender := sdk.AccAddress(spenderAddr.Bytes()) // aka. grantee
-	ownerIsSpender := spender.Equals(owner)
-
-	prevAllowance, err := p.transferAmount(ctx, burnerAddr, spenderAddr, amount)
-	if err != nil {
-		return nil, ConvertErrToERC20Error(err)
-	}
-
-	if err := p.burn(ctx, stateDB, spenderAddr, amount, false); err != nil {
-		return nil, ConvertErrToERC20Error(err)
-	}
-
-	if err = p.EmitTransferEvent(ctx, stateDB, burnerAddr, ZeroAddress, amount); err != nil {
-		return nil, err
-	}
-
-	var newAllowance *big.Int
-	if ownerIsSpender {
-		// NOTE: in case the spender is the owner we emit an approval event with
-		// the maxUint256 value.
-		newAllowance = abi.MaxUint256
-	} else {
-		newAllowance = new(big.Int).Sub(prevAllowance, amount)
-	}
-
-	if err = p.EmitApprovalEvent(ctx, stateDB, burnerAddr, spenderAddr, newAllowance); err != nil {
+	if _, err := p.transfer(ctx, contract, stateDB, method, owner, ZeroAddress, amount); err != nil {
 		return nil, err
 	}
 

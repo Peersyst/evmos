@@ -48,8 +48,42 @@ func (p Precompile) Approve(
 	grantee := spender
 	granter := contract.CallerAddress
 
-	err = p.approve(ctx, stateDB, grantee, granter, amount, true)
+	// NOTE: We do not support approvals if the grantee is the granter.
+	// This is different from the ERC20 standard but there is no reason to
+	// do so, since in that case the grantee can just transfer the tokens
+	// without authorization.
+	if bytes.Equal(grantee.Bytes(), granter.Bytes()) {
+		return nil, ErrSpenderIsOwner
+	}
+
+	// TODO: owner should be the owner of the contract
+	authorization, expiration, _ := auth.CheckAuthzExists(ctx, p.AuthzKeeper, grantee, granter, SendMsgURL) //#nosec:G703 -- we are handling the error case (authorization == nil) in the switch statement below
+
+	switch {
+	case authorization == nil && amount != nil && amount.Sign() < 0:
+		// case 1: no authorization, amount 0 or negative -> error
+		err = ErrNegativeAmount
+	case authorization == nil && amount != nil && amount.Sign() > 0:
+		// case 2: no authorization, amount positive -> create a new authorization
+		err = p.createAuthorization(ctx, grantee, granter, amount)
+	case authorization != nil && amount != nil && amount.Sign() <= 0:
+		// case 3: authorization exists, amount 0 or negative -> remove from spend limit and delete authorization if no spend limit left
+		err = p.removeSpendLimitOrDeleteAuthorization(ctx, grantee, granter, authorization, expiration)
+	case authorization != nil && amount != nil && amount.Sign() > 0:
+		// case 4: authorization exists, amount positive -> update authorization
+		sendAuthz, ok := authorization.(*banktypes.SendAuthorization)
+		if !ok {
+			return nil, authz.ErrUnknownAuthorizationType
+		}
+
+		err = p.updateAuthorization(ctx, grantee, granter, amount, sendAuthz, expiration)
+	}
 	if err != nil {
+		return nil, err
+	}
+
+	// TODO: check owner?
+	if err := p.EmitApprovalEvent(ctx, stateDB, p.Address(), spender, amount); err != nil {
 		return nil, err
 	}
 
@@ -296,51 +330,4 @@ func (p Precompile) decreaseAllowance(
 	}
 
 	return amount, nil
-}
-
-func (p Precompile) approve(ctx sdk.Context, stateDB vm.StateDB, spender, owner common.Address, amount *big.Int, emitEvent bool) error {
-	// NOTE: We do not support approvals if the grantee is the granter.
-	// This is different from the ERC20 standard but there is no reason to
-	// do so, since in that case the grantee can just transfer the tokens
-	// without authorization.
-	if bytes.Equal(spender.Bytes(), owner.Bytes()) {
-		return ErrSpenderIsOwner
-	}
-
-	// TODO: owner should be the owner of the contract
-	authorization, expiration, _ := auth.CheckAuthzExists(ctx, p.AuthzKeeper, spender, owner, SendMsgURL) //#nosec:G703 -- we are handling the error case (authorization == nil) in the switch statement below
-
-	var err error
-	switch {
-	case authorization == nil && amount != nil && amount.Sign() < 0:
-		// case 1: no authorization, amount 0 or negative -> error
-		err = ErrNegativeAmount
-	case authorization == nil && amount != nil && amount.Sign() > 0:
-		// case 2: no authorization, amount positive -> create a new authorization
-		err = p.createAuthorization(ctx, spender, owner, amount)
-	case authorization != nil && amount != nil && amount.Sign() <= 0:
-		// case 3: authorization exists, amount 0 or negative -> remove from spend limit and delete authorization if no spend limit left
-		err = p.removeSpendLimitOrDeleteAuthorization(ctx, spender, owner, authorization, expiration)
-	case authorization != nil && amount != nil && amount.Sign() > 0:
-		// case 4: authorization exists, amount positive -> update authorization
-		sendAuthz, ok := authorization.(*banktypes.SendAuthorization)
-		if !ok {
-			return authz.ErrUnknownAuthorizationType
-		}
-
-		err = p.updateAuthorization(ctx, spender, owner, amount, sendAuthz, expiration)
-	}
-
-	if err != nil {
-		return err
-	}
-
-	if emitEvent {
-		// TODO: check owner?
-		if err := p.EmitApprovalEvent(ctx, stateDB, p.Address(), spender, amount); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }

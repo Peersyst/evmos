@@ -208,7 +208,27 @@ func (p *Precompile) Burn(
 
 	burnerAddr := contract.CallerAddress
 
-	if err := p.burn(ctx, stateDB, burnerAddr, amount); err != nil {
+	if err := p.burn(ctx, stateDB, burnerAddr, amount, true); err != nil {
+		return nil, err
+	}
+
+	return method.Outputs.Pack()
+}
+
+// Burn0 executes a burn of the spender's tokens.
+func (p *Precompile) Burn0(
+	ctx sdk.Context,
+	_ *vm.Contract,
+	stateDB vm.StateDB,
+	method *abi.Method,
+	args []interface{},
+) ([]byte, error) {
+	spender, amount, err := ParseBurn0Args(args)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := p.burn(ctx, stateDB, spender, amount, true); err != nil {
 		return nil, err
 	}
 
@@ -228,11 +248,31 @@ func (p *Precompile) BurnFrom(
 		return nil, err
 	}
 
-	if err := p.spendAllowance(ctx, stateDB, burnerAddr, contract.CallerAddress, amount); err != nil {
+	owner := sdk.AccAddress(burnerAddr.Bytes())
+	spenderAddr := contract.CallerAddress
+	spender := sdk.AccAddress(spenderAddr.Bytes()) // aka. grantee
+	ownerIsSpender := spender.Equals(owner)
+
+	prevAllowance, err := p.transferAmount(ctx, burnerAddr, spenderAddr, amount)
+	if err != nil {
 		return nil, ConvertErrToERC20Error(err)
 	}
-	if err := p.burn(ctx, stateDB, burnerAddr, amount); err != nil {
+
+	if err := p.burn(ctx, stateDB, burnerAddr, amount, true); err != nil {
 		return nil, ConvertErrToERC20Error(err)
+	}
+
+	var newAllowance *big.Int
+	if ownerIsSpender {
+		// NOTE: in case the spender is the owner we emit an approval event with
+		// the maxUint256 value.
+		newAllowance = abi.MaxUint256
+	} else {
+		newAllowance = new(big.Int).Sub(prevAllowance, amount)
+	}
+
+	if err = p.EmitApprovalEvent(ctx, stateDB, burnerAddr, spenderAddr, newAllowance); err != nil {
+		return nil, err
 	}
 
 	return method.Outputs.Pack()
@@ -273,7 +313,7 @@ func (p *Precompile) TransferOwnership(
 
 // burn is a common function that handles burns for the ERC-20 Burn
 // and BurnFrom methods. It executes a bank BurnCoins message.
-func (p *Precompile) burn(ctx sdk.Context, stateDB vm.StateDB, burnerAddr common.Address, amount *big.Int) error {
+func (p *Precompile) burn(ctx sdk.Context, stateDB vm.StateDB, burnerAddr common.Address, amount *big.Int, emitEvents bool) error {
 	burner := sdk.AccAddress(burnerAddr.Bytes())
 
 	coins := sdk.Coins{{Denom: p.tokenPair.Denom, Amount: math.NewIntFromBigInt(amount)}}
@@ -288,9 +328,45 @@ func (p *Precompile) burn(ctx sdk.Context, stateDB vm.StateDB, burnerAddr common
 			cmn.NewBalanceChangeEntry(burnerAddr, coins.AmountOf(utils.BaseDenom).BigInt(), cmn.Sub))
 	}
 
-	if err = p.EmitTransferEvent(ctx, stateDB, burnerAddr, ZeroAddress, amount); err != nil {
-		return err
+	if emitEvents {
+		if err = p.EmitTransferEvent(ctx, stateDB, burnerAddr, ZeroAddress, amount); err != nil {
+			return err
+		}
 	}
 
 	return nil
+}
+
+func (p *Precompile) transferAmount(
+	ctx sdk.Context,
+	from, to common.Address,
+	amount *big.Int,
+) (*big.Int, error) {
+	fromAddr := sdk.AccAddress(from.Bytes())
+	toAddr := sdk.AccAddress(to.Bytes())
+	ownerIsSpender := fromAddr.Equals(toAddr)
+
+	coins := sdk.Coins{{Denom: p.tokenPair.Denom, Amount: math.NewIntFromBigInt(amount)}}
+
+	msg := banktypes.NewMsgSend(fromAddr.Bytes(), toAddr.Bytes(), coins)
+
+	if err := msg.Amount.Validate(); err != nil {
+		return nil, err
+	}
+
+	var prevAllowance *big.Int
+	var err error
+	if ownerIsSpender {
+		msgSrv := bankkeeper.NewMsgServerImpl(p.bankKeeper)
+		_, err = msgSrv.Send(ctx, msg)
+	} else {
+		_, _, prevAllowance, err = GetAuthzExpirationAndAllowance(p.AuthzKeeper, ctx, to, from, p.tokenPair.Denom)
+		if err != nil {
+			return nil, ConvertErrToERC20Error(errorsmod.Wrapf(authz.ErrNoAuthorizationFound, "%s", err.Error()))
+		}
+
+		_, err = p.AuthzKeeper.DispatchActions(ctx, toAddr, []sdk.Msg{msg})
+	}
+
+	return prevAllowance, err
 }

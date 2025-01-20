@@ -213,7 +213,7 @@ func (p *Precompile) HandleMethod(
 	case BurnMethod:
 		bz, err = p.Burn(ctx, contract, stateDB, method, args)
 	case Burn0Method:
-		bz, err = p.BurnFrom(ctx, contract, stateDB, method, args)
+		bz, err = p.Burn0(ctx, contract, stateDB, method, args)
 	case BurnFromMethod:
 		bz, err = p.BurnFrom(ctx, contract, stateDB, method, args)
 	case TransferOwnershipMethod:

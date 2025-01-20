@@ -201,6 +201,24 @@ func ParseBurnArgs(args []interface{}) (amount *big.Int, err error) {
 	return amount, nil
 }
 
+func ParseBurn0Args(args []interface{}) (spender common.Address, amount *big.Int, err error) {
+	if len(args) != 2 {
+		return common.Address{}, nil, fmt.Errorf("invalid number of arguments; expected 2; got: %d", len(args))
+	}
+
+	spender, ok := args[0].(common.Address)
+	if !ok {
+		return common.Address{}, nil, fmt.Errorf("invalid spender address: %v", args[0])
+	}
+
+	amount, ok = args[1].(*big.Int)
+	if !ok {
+		return common.Address{}, nil, fmt.Errorf("invalid amount: %v", args[1])
+	}
+
+	return spender, amount, nil
+}
+
 // ParseBurnFromArgs parses the arguments from the burnFrom method and returns the
 // from address and amount.
 func ParseBurnFromArgs(args []interface{}) (from common.Address, amount *big.Int, err error) {

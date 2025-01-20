@@ -21,7 +21,6 @@ import (
 	auth "github.com/evmos/evmos/v20/precompiles/authorization"
 	cmn "github.com/evmos/evmos/v20/precompiles/common"
 	"github.com/evmos/evmos/v20/x/evm/core/vm"
-	"github.com/holiman/uint256"
 )
 
 // Approve sets the given amount as the allowance of the spender address over
@@ -344,39 +343,4 @@ func (p Precompile) approve(ctx sdk.Context, stateDB vm.StateDB, spender, owner 
 	}
 
 	return nil
-}
-
-// spendAllowance is a common function that handles spending allowances for the ERC-20 Transfer
-// and TransferFrom methods. It checks the allowance of the spender over the owner's tokens.
-func (p *Precompile) spendAllowance(ctx sdk.Context, stateDB vm.StateDB, owner, spender common.Address, amount *big.Int) error {
-	_, _, allowance, err := GetAuthzExpirationAndAllowance(p.AuthzKeeper, ctx, spender, owner, p.tokenPair.Denom)
-	if err != nil {
-		allowance = common.Big0
-	}
-
-	// Check if the allowance does not overflow
-	allowanceUint256, overflow := uint256.FromBig(allowance)
-	if overflow {
-		return fmt.Errorf(ErrIntegerOverflow, allowance)
-	}
-
-	// Check if the amount does not overflow
-	amountUint256, overflow := uint256.FromBig(amount)
-	if overflow {
-		return fmt.Errorf(ErrIntegerOverflow, amount)
-	}
-
-	// Check if the allowance is less than the amount, if so, return an error
-	if allowanceUint256.Lt(amountUint256) {
-		return errors.New(ErrSubtractMoreThanAllowance)
-	}
-
-	return p.approve(
-		ctx,
-		stateDB,
-		owner,
-		spender,
-		new(big.Int).Sub(allowance, amount),
-		false,
-	)
 }

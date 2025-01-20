@@ -214,7 +214,7 @@ func (p *Precompile) Burn(
 
 	burnerAddr := contract.CallerAddress
 
-	if err := p.burn(ctx, stateDB, burnerAddr, amount, true); err != nil {
+	if err := p.burn(ctx, stateDB, burnerAddr, amount); err != nil {
 		return nil, err
 	}
 
@@ -244,7 +244,7 @@ func (p *Precompile) Burn0(
 		return nil, ConvertErrToERC20Error(types.ErrSenderIsNotOwner)
 	}
 
-	if err := p.burn(ctx, stateDB, spender, amount, true); err != nil {
+	if err := p.burn(ctx, stateDB, spender, amount); err != nil {
 		return nil, err
 	}
 
@@ -264,11 +264,7 @@ func (p *Precompile) BurnFrom(
 		return nil, err
 	}
 
-	if _, err := p.transfer(ctx, contract, stateDB, method, owner, ZeroAddress, amount); err != nil {
-		return nil, err
-	}
-
-	return method.Outputs.Pack()
+	return p.transfer(ctx, contract, stateDB, method, owner, ZeroAddress, amount)
 }
 
 // TransferOwnership executes a transfer of ownership of the token.
@@ -306,7 +302,7 @@ func (p *Precompile) TransferOwnership(
 
 // burn is a common function that handles burns for the ERC-20 Burn
 // and BurnFrom methods. It executes a bank BurnCoins message.
-func (p *Precompile) burn(ctx sdk.Context, stateDB vm.StateDB, burnerAddr common.Address, amount *big.Int, emitEvents bool) error {
+func (p *Precompile) burn(ctx sdk.Context, stateDB vm.StateDB, burnerAddr common.Address, amount *big.Int) error {
 	burner := sdk.AccAddress(burnerAddr.Bytes())
 
 	coins := sdk.Coins{{Denom: p.tokenPair.Denom, Amount: math.NewIntFromBigInt(amount)}}
@@ -321,10 +317,8 @@ func (p *Precompile) burn(ctx sdk.Context, stateDB vm.StateDB, burnerAddr common
 			cmn.NewBalanceChangeEntry(burnerAddr, coins.AmountOf(utils.BaseDenom).BigInt(), cmn.Sub))
 	}
 
-	if emitEvents {
-		if err = p.EmitTransferEvent(ctx, stateDB, burnerAddr, ZeroAddress, amount); err != nil {
-			return err
-		}
+	if err = p.EmitTransferEvent(ctx, stateDB, burnerAddr, ZeroAddress, amount); err != nil {
+		return err
 	}
 
 	return nil

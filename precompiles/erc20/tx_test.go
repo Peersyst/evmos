@@ -493,15 +493,15 @@ func (s *PrecompileTestSuite) TestBurn0() {
 
 	testcases := []struct {
 		name        string
-		malleate    func() (keyring.Key, keyring.Key, []interface{})
+		malleate    func() (keyring.Key, keyring.Key, keyring.Key, []interface{})
 		postCheck   func()
 		expErr      bool
 		errContains string
 	}{
 		{
 			"should fail - empty args",
-			func() (keyring.Key, keyring.Key, []interface{}) {
-				return s.keyring.GetKey(0), s.keyring.GetKey(1), nil
+			func() (keyring.Key, keyring.Key, keyring.Key, []interface{}) {
+				return s.keyring.GetKey(0), s.keyring.GetKey(1), s.keyring.GetKey(0), nil
 			},
 			func() {},
 			true,
@@ -509,8 +509,8 @@ func (s *PrecompileTestSuite) TestBurn0() {
 		},
 		{
 			"should fail - invalid spender address",
-			func() (keyring.Key, keyring.Key, []interface{}) {
-				return s.keyring.GetKey(0), s.keyring.GetKey(1), []interface{}{
+			func() (keyring.Key, keyring.Key, keyring.Key, []interface{}) {
+				return s.keyring.GetKey(0), s.keyring.GetKey(1), s.keyring.GetKey(0), []interface{}{
 					"invalid",
 					big.NewInt(amount),
 				}
@@ -521,8 +521,8 @@ func (s *PrecompileTestSuite) TestBurn0() {
 		},
 		{
 			"should fail - invalid amount",
-			func() (keyring.Key, keyring.Key, []interface{}) {
-				return s.keyring.GetKey(0), s.keyring.GetKey(1), []interface{}{
+			func() (keyring.Key, keyring.Key, keyring.Key, []interface{}) {
+				return s.keyring.GetKey(0), s.keyring.GetKey(1), s.keyring.GetKey(0), []interface{}{
 					s.keyring.GetAddr(0),
 					"invalid",
 				}
@@ -532,9 +532,21 @@ func (s *PrecompileTestSuite) TestBurn0() {
 			"invalid amount",
 		},
 		{
+			"should fail - sender is not the owner",
+			func() (keyring.Key, keyring.Key, keyring.Key, []interface{}) {
+				return s.keyring.GetKey(0), s.keyring.GetKey(1), s.keyring.GetKey(2), []interface{}{
+					s.keyring.GetAddr(1),
+					big.NewInt(1000),
+				}
+			},
+			func() {},
+			true,
+			"sender is not the owner",
+		},
+		{
 			"should pass - valid burn0",
-			func() (keyring.Key, keyring.Key, []interface{}) {
-				return s.keyring.GetKey(0), s.keyring.GetKey(1), []interface{}{
+			func() (keyring.Key, keyring.Key, keyring.Key, []interface{}) {
+				return s.keyring.GetKey(0), s.keyring.GetKey(1), s.keyring.GetKey(0), []interface{}{
 					s.keyring.GetAddr(1),
 					big.NewInt(amount),
 				}
@@ -550,13 +562,13 @@ func (s *PrecompileTestSuite) TestBurn0() {
 		s.Run(tc.name, func() {
 			s.SetupTest()
 
-			contractDeployer, prefundedAccount, args := tc.malleate()
+			contractDeployer, prefundedAccount, owner, args := tc.malleate()
 
 			stateDB := s.network.GetStateDB()
 			coins := sdk.Coins{{Denom: tokenDenom, Amount: math.NewInt(100)}}
 
 			tokenPair := erc20types.NewTokenPair(utiltx.GenerateAddress(), s.tokenDenom, erc20types.OWNER_MODULE)
-			tokenPair.SetOwnerAddress(contractDeployer.AccAddr.String())
+			tokenPair.SetOwnerAddress(owner.AccAddr.String())
 			s.network.App.Erc20Keeper.SetTokenPair(s.network.GetContext(), tokenPair)
 			s.network.App.Erc20Keeper.SetDenomMap(s.network.GetContext(), tokenPair.Denom, tokenPair.GetID())
 			s.network.App.Erc20Keeper.SetERC20Map(s.network.GetContext(), tokenPair.GetERC20Contract(), tokenPair.GetID())

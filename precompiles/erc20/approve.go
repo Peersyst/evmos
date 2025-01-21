@@ -78,7 +78,6 @@ func (p Precompile) Approve(
 
 		err = p.updateAuthorization(ctx, grantee, granter, amount, sendAuthz, expiration)
 	}
-
 	if err != nil {
 		return nil, err
 	}

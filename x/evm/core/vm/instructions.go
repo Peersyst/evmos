@@ -522,6 +522,38 @@ func opMstore8(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 	return nil, nil
 }
 
+// opMcopy implements EIP-5656 MCOPY operation
+//
+// Stack Input:
+//   [ length     | top    ]  -- number of bytes to copy
+//   [ srcOffset  | second ]  -- source memory offset
+//   [ destOffset | third  ]  -- destination memory offset
+//
+// Operation Flow:
+//  1. Pop parameters from stack:
+//     - destination offset
+//     - source offset 
+//     - length
+//  2. Convert stack items to uint64
+//  3. Copy memory from source to destination
+func opMcopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	var (
+		destOffset = scope.Stack.Pop()
+		srcOffset  = scope.Stack.Pop()
+		length     = scope.Stack.Pop()
+	)
+
+	// Convert stack items to integers
+	destOffsetInt := destOffset.Uint64()
+	srcOffsetInt := srcOffset.Uint64()
+	lengthInt := length.Uint64()
+
+	// Copy memory
+	scope.Memory.Set(destOffsetInt, lengthInt, scope.Memory.GetPtr(int64(srcOffsetInt), int64(lengthInt)))
+
+	return nil, nil
+}
+
 func opSload(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	loc := scope.Stack.Peek()
 	hash := common.Hash(loc.Bytes32())

@@ -564,6 +564,31 @@ func TestOpMstore(t *testing.T) {
 	}
 }
 
+func TestOpMcopy(t *testing.T) {
+	var (
+		env            = NewEVM(BlockContext{}, TxContext{}, nil, params.TestChainConfig, Config{})
+		stack, err     = NewStack()
+		mem            = NewMemory()
+		evmInterpreter = NewEVMInterpreter(env, env.Config)
+		pc            = uint64(0)
+	)
+	require.NoError(t, err)
+
+	env.interpreter = evmInterpreter
+	mem.Resize(100)
+	mem.Set(10, 3, []byte{0x01, 0x02, 0x03})
+
+	stack.Push(new(uint256.Int).SetUint64(3))  // length
+	stack.Push(new(uint256.Int).SetUint64(10)) // srcOffset 
+	stack.Push(new(uint256.Int).SetUint64(20)) // destOffset
+
+	opMcopy(&pc, evmInterpreter, &ScopeContext{mem, stack, nil})
+
+	expected := []byte{0x01, 0x02, 0x03}
+	actual := mem.GetCopy(20, 3)
+	require.Equal(t, expected, actual)
+}
+
 func BenchmarkOpMstore(bench *testing.B) {
 	var (
 		env            = NewEVM(BlockContext{}, TxContext{}, nil, params.TestChainConfig, Config{})

@@ -576,6 +576,14 @@ func newFrontierInstructionSet() JumpTable {
 			minStack:    minStack(2, 0),
 			maxStack:    maxStack(2, 0),
 		},
+		MCOPY: {
+			execute:     opMcopy,
+			constantGas: GasFastestStep,
+			dynamicGas:  gasMStore,
+			minStack:    minStack(3, 0),
+			maxStack:    maxStack(3, 0),
+			memorySize:  memoryMStore,
+		},
 		SLOAD: {
 			execute:     opSload,
 			constantGas: params.SloadGasFrontier,
